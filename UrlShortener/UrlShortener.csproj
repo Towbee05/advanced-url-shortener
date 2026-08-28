@@ -8,13 +8,20 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
     <PackageReference Include="Dapper" Version="2.1.79" />
     <PackageReference Include="dbup-postgresql" Version="7.0.1" />
+    <PackageReference Include="Fluid.Core" Version="2.40.0" />
+    <PackageReference Include="MailKit" Version="4.17.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.30" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.28" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="StackExchange.Redis" Version="3.1.13" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
 
-    <EmbeddedResource Include="Database/Scripts/*.sql"/>
+    <EmbeddedResource Include="Database/Scripts/*.sql" />
+    <None Include="Templates/**/*.liquid" CopyToOutputDirectory="PreserveNewest" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.22.0" />
   </ItemGroup>
 
 </Project>

@@ -13,5 +13,29 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
   
+  redis:
+    image: redis
+    container_name: url_shortener_redis
+    ports:
+      - "6379:6379"
+    restart: always
+    volumes:
+    - redis_data:/data
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redis_insight
+    restart: always
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      - redis
+
+
+
 volumes:
   postgresql_data:
+  redis_data:
+  redisinsight_data:
