@@ -1,0 +1,3 @@
+ALTER TABLE urls DROP COLUMN expired_at;
+
+ALTER TABLE urls ADD COLUMN expires_at TIMESTAMPTZ;

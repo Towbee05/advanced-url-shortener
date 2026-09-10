@@ -205,6 +205,7 @@ This is a design for a URL shortener. A URL shortener is a tool that takes in a 
 erDiagram
     USER {
         uuid id PK NOT NULL
+        string username NOT NULL
         string email NOT NULL
         string password NOT NULL
         timestamptz created_at NOT NULL
