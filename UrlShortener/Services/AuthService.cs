@@ -6,7 +6,9 @@ using UrlShortener.Repository;
 using UrlShortener.Models;
 using UrlShortener.DTO.Response;
 using UrlShortener.Entities;
+using UrlShortener.Helpers;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace UrlShortener.Services;
 
@@ -47,6 +49,9 @@ public class AuthService : IAuthService
         try
         {
             // Verify if email exists 
+            email = EmailNormalizer.Normalize(email);
+            username = UsernameNormalizer.Normalize(username);
+
             var existingEmail = await this._userRepository.GetUserByEmailAsync(email);
 
             if (existingEmail is not null)
@@ -147,9 +152,10 @@ public class AuthService : IAuthService
 
     public async Task<ServiceResult<AuthenticationModel>> VerifyEmailAsync(string email, string verificationCode)
     {
+        email = EmailNormalizer.Normalize(email);
+        var key = $"{this.notVerifiedKey}:{email}";
         try
         {
-            var key = $"{this.notVerifiedKey}:{email}";
             // Check if email exists in cache via verification email
             string? cachedValue = await this._redis.GetStringAsync(key);
             if (cachedValue is null)
@@ -208,6 +214,15 @@ public class AuthService : IAuthService
             if (!ok)
             {
                 this._logger.LogWarning("verify email auth service: unable to store referesh token in cache");
+                return new ServiceResult<AuthenticationModel>
+                {
+                    Success = true,
+                    Data = new AuthenticationModel
+                    {
+                        AccessToken = accessToken,
+                        RefreshToken = string.Empty  // signal to client
+                    }
+                };
             }
             // Delete verification key
             bool deleted = await this._redis.DeleteStringAsync(key);
@@ -225,6 +240,16 @@ public class AuthService : IAuthService
                 }
             };
         }
+        catch (PostgresException ex) when (ex.SqlState == "23505")
+        {
+            await this._redis.DeleteStringAsync(key);
+            return new ServiceResult<AuthenticationModel>
+            {
+                Success = false,
+                Error = "user already registered, please log in",
+                ErrorCode = (int)HttpStatusCode.Conflict
+            };
+        }
         catch (Exception ex)
         {
             this._logger.LogError(ex, "failed to verify new user");
@@ -236,10 +261,13 @@ public class AuthService : IAuthService
             };
         }
     }
+
     public async Task<ServiceResult<AuthenticationModel>> LoginAsync(string email, string password)
     {
         try
         {
+            email = EmailNormalizer.Normalize(email);
+            
             // Verify if email exists 
             var user = await this._userRepository.GetUserByEmailAsync(email);
             if (user is null)
@@ -288,6 +316,15 @@ public class AuthService : IAuthService
             if (!ok)
             {
                 this._logger.LogWarning("Login auth service: failed to store refresh token in cache");
+                return new ServiceResult<AuthenticationModel>
+                {
+                    Success = true,
+                    Data = new AuthenticationModel
+                    {
+                        AccessToken = accessToken,
+                        RefreshToken = string.Empty  // signal to client
+                    }
+                };
             }
             return new ServiceResult<AuthenticationModel>
             {
@@ -316,6 +353,8 @@ public class AuthService : IAuthService
     {
         try
         {
+            email = EmailNormalizer.Normalize(email);
+            
             // Verify if email exists
             var user = await this._userRepository.GetUserByEmailAsync(email);
             if (user is null)
@@ -395,6 +434,8 @@ public class AuthService : IAuthService
         try
         {
             // Check if email exists
+            email = EmailNormalizer.Normalize(email);
+        
             var user = await this._userRepository.GetUserByEmailAsync(email);
             if (user is null)
             {
@@ -451,6 +492,15 @@ public class AuthService : IAuthService
             string hashedPassword = BCrypt.Net.BCrypt.HashPassword(newPassword);
             User? updatedUser = await this._userRepository.UpdatePasswordByEmailAsync(email, hashedPassword, DateTime.UtcNow);
 
+            if (updatedUser is null)
+            {
+                return new ServiceResult<string>{
+                    Success = false,
+                    Error = "failed to update password",
+                    ErrorCode = (int)HttpStatusCode.InternalServerError
+                };
+
+            }
             // Delete reset token from cache
             await this._redis.DeleteStringAsync($"{this.forgotPasswordKey}:{email}");
             return new ServiceResult<string>
@@ -486,7 +536,7 @@ public class AuthService : IAuthService
                 {
                     Success = false,
                     Error = "refresh token was not found",
-                    ErrorCode = (int)HttpStatusCode.NotFound
+                    ErrorCode = (int)HttpStatusCode.Unauthorized
                 };
             }
             User? user = await this._userRepository.GetUserByIdAsync(userId.Value);
@@ -498,16 +548,32 @@ public class AuthService : IAuthService
                 {
                     Success = false,
                     Error = "refresh token was not found",
-                    ErrorCode = (int)HttpStatusCode.NotFound
+                    ErrorCode = (int)HttpStatusCode.Unauthorized
                 };
             }
             
+
             // Generatr new access and new refresh token
             string accessToken = this._jwt.GenerateAccessToken(user);
             string newRefreshToken = this._jwt.GenerateRefreshToken();
 
             // add new refresh token
-            await this._jwt.StoreRefreshTokenAsync(user.Id, newRefreshToken);
+            bool ok = await this._jwt.StoreRefreshTokenAsync(user.Id, newRefreshToken);
+            if (!ok)
+            {
+                this._logger.LogWarning("Refresh token auth service: failed to store refresh token in cache");
+                return new ServiceResult<AuthenticationModel>
+                {
+                    Success = true,
+                    Data = new AuthenticationModel
+                    {
+                        AccessToken = accessToken,
+                        RefreshToken = string.Empty  // signal to client
+                    }
+                };
+            }
+
+            await this._jwt.RevokeRefreshTokenAsync(refreshToken);
 
             this._logger.LogInformation("Refresh token auth service: successfully refreshed access token");
             return new ServiceResult<AuthenticationModel>

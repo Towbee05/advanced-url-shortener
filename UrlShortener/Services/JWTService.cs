@@ -14,6 +14,7 @@ public interface IJwtService
     string GenerateRefreshToken();
     Task<bool> StoreRefreshTokenAsync(Guid userId, string refreshToken);
     Task<Guid?> ValidateRefreshTokenAsync(string refreshToken);
+    Task<bool?> RevokeRefreshTokenAsync(string refreshToken);
 }
 
 public class JWTService : IJwtService
@@ -69,7 +70,7 @@ public class JWTService : IJwtService
     public async Task<Guid?> ValidateRefreshTokenAsync(string refreshToken)
     {
         string key = $"RefreshToken:{refreshToken}";
-        string? userIdString = await this._cache.GetAndDeleteAsync(key);
+        string? userIdString = await this._cache.GetStringAsync(key);
 
         if (userIdString is null)
         {
@@ -77,5 +78,11 @@ public class JWTService : IJwtService
         }
 
         return Guid.Parse(userIdString);
+    }
+
+    public async Task<bool?> RevokeRefreshTokenAsync(string refreshToken)
+    {
+        string key = $"RefreshToken:{refreshToken}";
+        return await this._cache.DeleteStringAsync(key);
     }
 }

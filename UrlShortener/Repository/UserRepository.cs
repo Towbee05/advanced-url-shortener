@@ -87,7 +87,7 @@ public class UserRepository : IUserRepository
         ";
 
         using var connection = this._connectionFactory.CreateConnection();
-        return await connection.QuerySingleAsync<User>(sql, new
+        return await connection.QuerySingleOrDefaultAsync<User>(sql, new
         {
             Email = email,
             Password = password,

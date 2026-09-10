@@ -7,6 +7,6 @@ public class Urls
     public string OriginalUrl { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
-    public DateTime ExpiresAt { get; set; }
+    public DateTime? ExpiresAt { get; set; }
     public bool IsActive { get; set; }
 }
