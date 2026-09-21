@@ -10,7 +10,10 @@ using UrlShortener.Entities;
 using UrlShortener.Repository;
 using UrlShortener.Services;
 using UrlShortener.Swagger;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Google;
 
+var myAllowedCorsOrigin = "_myAllowedCorsOrigin";
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +27,17 @@ var redisConnectionString = builder.Configuration.GetConnectionString("Redis")
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(name: myAllowedCorsOrigin,
+        policy =>
+        {
+            policy.WithOrigins("http://localhost:3000")
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
+    );
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -42,15 +56,28 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddControllers();
 builder.Services.Configure<SMTPSettings>(builder.Configuration.GetSection("SMTPSettings"));
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
+builder.Services.Configure<GoogleAuthSettings>(builder.Configuration.GetSection("AuthenticationSettings:Google"));
 
 var jwtSettings = builder.Configuration.GetSection("JwtSettings").Get<JwtSettings>()
     ?? throw new InvalidOperationException("JwtSettings is not configured");
 
+
+// General Authentication setup
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-}).AddJwtBearer(options =>
+    options.DefaultSignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+})
+.AddCookie()
+.AddGoogle(options =>
+{
+    options.ClientId = builder.Configuration["AuthenticationSettings:Google:ClientID"]!;
+    options.ClientSecret = builder.Configuration["AuthenticationSettings:Google:ClientSecret"]!;
+    options.CallbackPath = "/api/auth/google/callback";
+    options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
 {
     options.MapInboundClaims = false;
     options.TokenValidationParameters = new TokenValidationParameters
@@ -92,6 +119,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseAuthentication();
+
+app.UseCors(myAllowedCorsOrigin);
 app.UseAuthorization();
 app.MapControllers();
 

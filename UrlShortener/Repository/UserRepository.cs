@@ -11,6 +11,7 @@ public interface IUserRepository
     Task<User?> GetUserByUsernameAsync(string username);
     Task<User> CreateUserAsync(User user);
     Task<User?> UpdatePasswordByEmailAsync(string email, string password, DateTime updatedAt);
+    Task<User?> GetUserByEmailAndAuthProvider(string email, string authProvider);
 }
 
 public class UserRepository : IUserRepository
@@ -25,9 +26,9 @@ public class UserRepository : IUserRepository
     public async Task<User> CreateUserAsync(User user)
     {
         string sql = @"
-        INSERT INTO users (username, email, password, updated_at, is_verified)
-        VALUES (@Username, @Email, @Password, @UpdatedAt, @IsVerified)
-        RETURNING id, username, email, password, created_at, updated_at, is_active, is_verified;
+        INSERT INTO users (username, email, password, auth_provider, updated_at, is_verified)
+        VALUES (@Username, @Email, @Password, @AuthProvider, @UpdatedAt, @IsVerified)
+        RETURNING id, username, email, password, auth_provider, created_at, updated_at, is_active, is_verified;
         ";
 
         using var connection = this._connectionFactory.CreateConnection();
@@ -36,6 +37,7 @@ public class UserRepository : IUserRepository
             Username = user.Username,
             Email = user.Email,
             Password = user.Password,
+            AuthProvider = user.AuthProvider,
             UpdatedAt = user.UpdatedAt,
             IsVerified = user.IsVerified
         });
@@ -63,6 +65,21 @@ public class UserRepository : IUserRepository
 
         using var connection = this._connectionFactory.CreateConnection();
         return await connection.QuerySingleOrDefaultAsync<User>(sql, new { Email = email });
+    }
+
+    public async Task<User?> GetUserByEmailAndAuthProvider(string email, string authProvider)
+    {
+        string sql = @"
+        SELECT * FROM users
+        WHERE email=@Email and auth_provider=@AuthProvider
+        LIMIT 1;
+        ";
+        using var connection = this._connectionFactory.CreateConnection();
+        return await connection.QuerySingleOrDefaultAsync<User>(sql, new
+        {
+            Email = email,
+            AuthProvider = authProvider
+        });
     }
 
     public async Task<User?> GetUserByUsernameAsync(string username)

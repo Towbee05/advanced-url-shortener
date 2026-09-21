@@ -10,17 +10,17 @@ using UrlShortener.Models;
 namespace UrlShortener.Controllers;
 
 [ApiController]
-[Route("api/v1/urls")]
-public class UrlController: ControllerBase
+[Route("")]
+public class UrlController : ControllerBase
 {
     private readonly IUrlServices _urlServices;
-    public UrlController (IUrlServices urlServices)
+    public UrlController(IUrlServices urlServices)
     {
         this._urlServices = urlServices;
     }
 
     [Authorize]
-    [HttpPost("")]
+    [HttpPost("api/v1/urls")]
     public async Task<IActionResult> CreateUrlAsync([FromBody] CreateUrlData request)
     {
         var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
@@ -40,5 +40,23 @@ public class UrlController: ControllerBase
         {
             Data = result.Data
         });
+    }
+
+    [HttpGet("{shortCode}")]
+    public async Task<IActionResult> GetShortUrlAsync(string shortCode)
+    {
+        var result = await this._urlServices.GetLongUrlAsync(shortCode);
+        if (!result.Success)
+        {
+            return StatusCode(result.ErrorCode ?? (int)HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Details = result.Error ?? "an error occured."
+            });
+        }
+        return RedirectPermanent(result.Data);
+        // return StatusCode((int)HttpStatusCode.Created, new SuccessResponse<string>
+        // {
+        //     Data = result.Data
+        // });
     }
 }

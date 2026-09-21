@@ -9,6 +9,7 @@ using UrlShortener.Entities;
 using UrlShortener.Helpers;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Google.Apis.Auth;
 
 namespace UrlShortener.Services;
 
@@ -20,7 +21,8 @@ public interface IAuthService
     Task<ServiceResult<string>> ForgotPasswordAsync(string email);
     Task<ServiceResult<string>> ResetPasswordAsync(string email, string resetPasswordToken, string newPassword, string confirmNewPassword);
     Task<ServiceResult<AuthenticationModel>> RefreshTokenAsync(string refreshToken);
-    Task<ServiceResult<string>> LogoutAsync (Guid userId, string refreshToken);
+    Task<ServiceResult<string>> LogoutAsync(Guid userId, string refreshToken);
+    Task<ServiceResult<AuthenticationModel>> GoogleAuthAsync(string idToken);
 }
 
 public class AuthService : IAuthService
@@ -31,10 +33,14 @@ public class AuthService : IAuthService
     private readonly ILogger<AuthService> _logger;
     private readonly IEmailService _mailer;
     private readonly AppSettings _appSettings;
+    private readonly GoogleAuthSettings _googleSettings;
     private readonly string notVerifiedKey = "AwaitingVerification";
     private readonly string forgotPasswordKey = "ForgotPassword";
+    private readonly string localAuthProvider = "local";
+    private readonly string googleAuthProvider = "google";
 
-    public AuthService(IUserRepository userRepo, ICacheService redis, ILogger<AuthService> logger, IEmailService email, IJwtService jwt, IOptions<AppSettings> appSettings)
+
+    public AuthService(IUserRepository userRepo, ICacheService redis, ILogger<AuthService> logger, IEmailService email, IJwtService jwt, IOptions<AppSettings> appSettings, IOptions<GoogleAuthSettings> googleSettings)
     {
         this._userRepository = userRepo;
         this._redis = redis;
@@ -42,6 +48,7 @@ public class AuthService : IAuthService
         this._mailer = email;
         this._jwt = jwt;
         this._appSettings = appSettings.Value;
+        this._googleSettings = googleSettings.Value;
     }
 
     public async Task<ServiceResult<string>> RegisterAsync(string username, string email, string password)
@@ -52,7 +59,7 @@ public class AuthService : IAuthService
             email = EmailNormalizer.Normalize(email);
             username = UsernameNormalizer.Normalize(username);
 
-            var existingEmail = await this._userRepository.GetUserByEmailAsync(email);
+            var existingEmail = await this._userRepository.GetUserByEmailAndAuthProvider(email, localAuthProvider);
 
             if (existingEmail is not null)
             {
@@ -267,7 +274,7 @@ public class AuthService : IAuthService
         try
         {
             email = EmailNormalizer.Normalize(email);
-            
+
             // Verify if email exists 
             var user = await this._userRepository.GetUserByEmailAsync(email);
             if (user is null)
@@ -354,7 +361,7 @@ public class AuthService : IAuthService
         try
         {
             email = EmailNormalizer.Normalize(email);
-            
+
             // Verify if email exists
             var user = await this._userRepository.GetUserByEmailAsync(email);
             if (user is null)
@@ -435,7 +442,7 @@ public class AuthService : IAuthService
         {
             // Check if email exists
             email = EmailNormalizer.Normalize(email);
-        
+
             var user = await this._userRepository.GetUserByEmailAsync(email);
             if (user is null)
             {
@@ -494,7 +501,8 @@ public class AuthService : IAuthService
 
             if (updatedUser is null)
             {
-                return new ServiceResult<string>{
+                return new ServiceResult<string>
+                {
                     Success = false,
                     Error = "failed to update password",
                     ErrorCode = (int)HttpStatusCode.InternalServerError
@@ -551,7 +559,7 @@ public class AuthService : IAuthService
                     ErrorCode = (int)HttpStatusCode.Unauthorized
                 };
             }
-            
+
 
             // Generatr new access and new refresh token
             string accessToken = this._jwt.GenerateAccessToken(user);
@@ -585,7 +593,8 @@ public class AuthService : IAuthService
                     RefreshToken = newRefreshToken
                 }
             };
-        } catch (Exception ex)
+        }
+        catch (Exception ex)
         {
             this._logger.LogError(ex, "Reset password auth service: failed to send password reset link to user");
             return new ServiceResult<AuthenticationModel>
@@ -597,7 +606,7 @@ public class AuthService : IAuthService
         }
     }
 
-    public async Task<ServiceResult<string>> LogoutAsync (Guid userId, string refreshToken)
+    public async Task<ServiceResult<string>> LogoutAsync(Guid userId, string refreshToken)
     {
         try
         {
@@ -642,10 +651,101 @@ public class AuthService : IAuthService
                 Success = true,
                 Data = "user has successfully logged out"
             };
-        } catch (Exception ex)
+        }
+        catch (Exception ex)
         {
             this._logger.LogError(ex, "Logout auth service: failed to send password reset link to user");
             return new ServiceResult<string>
+            {
+                Success = false,
+                Error = "internal server error",
+                ErrorCode = (int)HttpStatusCode.InternalServerError
+            };
+        }
+    }
+
+    public async Task<ServiceResult<AuthenticationModel>> GoogleAuthAsync(string idToken)
+    {
+        try
+        {
+            this._logger.LogInformation("Activity got here!!");
+            GoogleJsonWebSignature.Payload payload;
+            try
+            {
+                payload = await GoogleJsonWebSignature.ValidateAsync(idToken, new GoogleJsonWebSignature.ValidationSettings
+                {
+                    Audience = new[] { this._googleSettings.ClientID }
+                });
+            }
+            catch (InvalidJwtException ex)
+            {
+                this._logger.LogWarning(ex, "Google auth service: id_token failed validation");
+                return new ServiceResult<AuthenticationModel>
+                {
+                    Success = false,
+                    Error = "invalid google token",
+                    ErrorCode = (int)HttpStatusCode.Unauthorized
+                };
+            }
+
+            string email = EmailNormalizer.Normalize(payload.Email);
+
+            // Check if this google-linked account already exists
+            var user = await this._userRepository.GetUserByEmailAndAuthProvider(email, googleAuthProvider);
+
+            if (user is null)
+            {
+                // First time signing in with google - create the account
+                user = await this._userRepository.CreateUserAsync(new User
+                {
+                    Email = email,
+                    Username = UsernameNormalizer.Normalize(payload.Name ?? email.Split('@')[0]),
+                    Password = string.Empty, // no local password for google-only accounts
+                    AuthProvider = this.googleAuthProvider,
+
+                    IsActive = true,
+                    IsVerified = true, // google has already verified the email
+                    UpdatedAt = DateTime.UtcNow
+                });
+                this._logger.LogInformation("Google auth service: created new user via google sign-in, {Email}", email);
+            }
+
+            if (!user.IsActive)
+            {
+                this._logger.LogWarning("Google auth service: user account is disabled, {Email}", email);
+                return new ServiceResult<AuthenticationModel>
+                {
+                    Success = false,
+                    Error = "user account is currently disabled",
+                    ErrorCode = (int)HttpStatusCode.Unauthorized
+                };
+            }
+
+            // issue tokens - identical to LoginAsync from here
+            string accessToken = this._jwt.GenerateAccessToken(user);
+            string refreshToken = this._jwt.GenerateRefreshToken();
+
+            bool ok = await this._jwt.StoreRefreshTokenAsync(user.Id, refreshToken);
+            if (!ok)
+            {
+                this._logger.LogWarning("Google auth service: failed to store refresh token in cache");
+                return new ServiceResult<AuthenticationModel>
+                {
+                    Success = true,
+                    Data = new AuthenticationModel { AccessToken = accessToken, RefreshToken = string.Empty }
+                };
+            }
+
+            return new ServiceResult<AuthenticationModel>
+            {
+                Success = true,
+                Data = new AuthenticationModel { AccessToken = accessToken, RefreshToken = refreshToken }
+            };
+        }
+        catch (Exception ex)
+        {
+            this._logger.LogError(ex, "Google auth service: failed to authenticate user via google");
+            return new ServiceResult<AuthenticationModel>
             {
                 Success = false,
                 Error = "internal server error",

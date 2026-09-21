@@ -7,13 +7,15 @@ namespace UrlShortener.Repository;
 public interface IUrlRepository
 {
     Task<Urls> CreateUrlsAsync(Urls urls);
+    Task<Urls?> GetUrlByCode(string shortCode);
 }
 
-public class UrlRepository: IUrlRepository
+public class UrlRepository : IUrlRepository
 {
     private readonly IConnectionFactory _connectionFactory;
 
-    public UrlRepository (IConnectionFactory connectionFactory) {
+    public UrlRepository(IConnectionFactory connectionFactory)
+    {
         this._connectionFactory = connectionFactory;
     }
 
@@ -34,6 +36,21 @@ public class UrlRepository: IUrlRepository
             CreatedAt = urls.CreatedAt,
             ExpiresAt = urls.ExpiresAt,
             IsActive = urls.IsActive
+        });
+    }
+
+    public async Task<Urls?> GetUrlByCode(string shortCode)
+    {
+        string sql = @"
+        SELECT * FROM urls
+        WHERE code=@Code
+        LIMIT 1;
+        ";
+
+        using var connection = this._connectionFactory.CreateConnection();
+        return await connection.QuerySingleOrDefaultAsync<Urls>(sql, new
+        {
+            Code = shortCode
         });
     }
 }

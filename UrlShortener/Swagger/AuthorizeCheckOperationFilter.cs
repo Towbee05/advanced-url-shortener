@@ -4,11 +4,11 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace UrlShortener.Swagger;
 
-public class AuthorizeCheckOperationFilter: IOperationFilter
+public class AuthorizeCheckOperationFilter : IOperationFilter
 {
-    public void Apply (OpenApiOperation operation, OperationFilterContext context)
+    public void Apply(OpenApiOperation operation, OperationFilterContext context)
     {
-        var hasAuthorized = context.MethodInfo.DeclaringType!.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any() 
+        var hasAuthorized = context.MethodInfo.DeclaringType!.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any()
         || context.MethodInfo.GetCustomAttributes(true).OfType<AuthorizeAttribute>().Any();
 
         if (!hasAuthorized)

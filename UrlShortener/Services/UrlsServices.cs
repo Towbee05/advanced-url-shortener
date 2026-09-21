@@ -7,10 +7,11 @@ namespace UrlShortener.Services;
 
 public interface IUrlServices
 {
-    Task<ServiceResult<Urls>> CreateShortUrlAsync (Guid userId, string longrl, DateTime? expiredAt);
+    Task<ServiceResult<Urls>> CreateShortUrlAsync(Guid userId, string longrl, DateTime? expiredAt);
+    Task<ServiceResult<string>> GetLongUrlAsync(string shortCode);
 }
 
-public class UrlServices: IUrlServices
+public class UrlServices : IUrlServices
 {
     private readonly IUrlRepository _urlRepo;
     private readonly ILogger<UrlServices> _logger;
@@ -23,7 +24,7 @@ public class UrlServices: IUrlServices
         this._random = new Random();
     }
 
-    public async Task<ServiceResult<Urls>> CreateShortUrlAsync (Guid userId, string longUrl, DateTime? expiredAt)
+    public async Task<ServiceResult<Urls>> CreateShortUrlAsync(Guid userId, string longUrl, DateTime? expiredAt)
     {
         try
         {
@@ -58,11 +59,64 @@ public class UrlServices: IUrlServices
                 Success = true,
                 Data = createdUrl
             };
-        } 
+        }
         catch (Exception e)
         {
             this._logger.LogError(e, "Create url service: failed to create new url");
             return new ServiceResult<Urls>
+            {
+                Success = false,
+                Error = "internal server error",
+                ErrorCode = (int)HttpStatusCode.InternalServerError
+            };
+        }
+    }
+
+    public async Task<ServiceResult<string>> GetLongUrlAsync(string shortCode)
+    {
+        try
+        {
+            Urls? url = await this._urlRepo.GetUrlByCode(shortCode);
+
+            if (url is null)
+            {
+                return new ServiceResult<string>
+                {
+                    Success = false,
+                    Error = "short code is not found",
+                    ErrorCode = (int)HttpStatusCode.NotFound
+                };
+            }
+
+            if (url.IsActive == false)
+            {
+                return new ServiceResult<string>
+                {
+                    Success = false,
+                    Error = "short code is no longer active",
+                    ErrorCode = (int)HttpStatusCode.NotFound
+                };
+            }
+
+            if (url.ExpiresAt < DateTime.UtcNow)
+            {
+                return new ServiceResult<string>
+                {
+                    Success = false,
+                    Error = "short code is expired",
+                    ErrorCode = (int)HttpStatusCode.NotFound
+                };
+            }
+            return new ServiceResult<string>
+            {
+                Success = true,
+                Data = url.OriginalUrl
+            };
+        }
+        catch (Exception e)
+        {
+            this._logger.LogError(e, "GetUrlByCode service: failed to get long url from short code");
+            return new ServiceResult<string>
             {
                 Success = false,
                 Error = "internal server error",
